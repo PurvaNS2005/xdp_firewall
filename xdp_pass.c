@@ -8,6 +8,63 @@
 #include <bpf/bpf_endian.h>
 
 
+#define STAT_TOTAL 0
+#define STAT_PASSED 1
+#define STAT_DROPPED 2
+#define STAT_RATE_LIMITED 3
+#define RATE_LIMIT_PACKETS 100  // max packets per IP before dropping
+
+
+struct lpm_key {
+    __u32 prefixlen;  // subnet prefix: 32 = exact IP, 24 = /24 subnet
+    __u32 addr;       // IP address in network byte order
+};
+
+
+// blocked ports
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, __u16);
+    __type(value, __u32);
+} blocked_ports SEC(".maps");
+
+// blocked IPs
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 1024);
+    __type(key, struct lpm_key);
+    __type(value, __u32);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} blocked_ips SEC(".maps");
+
+// per-IP rate limiting counters
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u32);    // src IP
+    __type(value, __u64);  // packet count
+} rate_counters SEC(".maps");
+
+// global stats counter
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 4);
+    __type(key, __u32);
+    __type(value, __u64);
+} stats SEC(".maps");
+
+// block/allow list mode flag
+// 0 = blocklist mode (default allow, block matches)
+// 1 = allowlist mode (default deny, allow matches)
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u32);
+} config SEC(".maps");
+
+
 // system uses x86 CPU which follows little endian format
 // networks uses big endian format
 
@@ -15,6 +72,11 @@
 // int pass(){
 //     return XDP_PASS;
 // }
+
+
+
+
+
 SEC("xdp")
 int xdp_pass_func(struct xdp_md *ctx){
     void *data = (void *)(long)ctx->data;           // points to the start of data
