@@ -123,6 +123,7 @@ int xdp_pass_func(struct xdp_md *ctx){
 
     __u32 src_ip = ip->saddr, dst_ip = ip->daddr;
     __u8 protoc = ip->protocol;
+    bpf_printk("src_ip=%u\n", src_ip);
 
      struct lpm_key curr_key = {};
     curr_key.addr = src_ip;
@@ -136,18 +137,31 @@ int xdp_pass_func(struct xdp_md *ctx){
 
 
 
-    if(protoc != IPPROTO_TCP){
-       // bpf_printk("Blocked at fourth filter......");
-        return XDP_PASS;         // passing non - tcp data for now (subject to change)***
-    }
-    
-    // transport layer
-    struct tcphdr *tcp = (void *)ip + (ip->ihl * 4);
-    if((void *)(tcp+1) > data_end){
-        //bpf_printk("Blocked at fifth filter......");
+    __u16 src_port = 0, dst_port = 0;
+
+    if(protoc == IPPROTO_TCP){
+        struct tcphdr *tcp = (void *)ip + (ip->ihl * 4);
+        if((void *)(tcp + 1) > data_end)
+            return XDP_PASS;
+        src_port = bpf_ntohs(tcp->source);
+        dst_port = bpf_ntohs(tcp->dest);
+
+    } else if(protoc == IPPROTO_UDP){
+        struct udphdr *udp = (void *)ip + (ip->ihl * 4);
+        if((void *)(udp + 1) > data_end)
+            return XDP_PASS;
+        src_port = bpf_ntohs(udp->source);
+        dst_port = bpf_ntohs(udp->dest);
+
+    } else if(protoc == IPPROTO_ICMP){
+        // ICMP has no ports — only IP rules apply
+        // port_match will stay 0, only ip_match matters
+
+    } else {
+        // unknown protocol — pass
         return XDP_PASS;
     }
-    __u16 src_port = bpf_ntohs(tcp->source), dst_port = bpf_ntohs(tcp->dest);
+    
     // if (src_port == 443) {
     //     bpf_printk("Blocked at sixth filter......");
     //     return XDP_DROP;

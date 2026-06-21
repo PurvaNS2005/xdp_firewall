@@ -1,0 +1,8 @@
+# compiled build artifacts
+*.o
+loader
+
+# editor/OS noise
+*.swp
+.vscode/
+.DS_Store
